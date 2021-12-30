@@ -5,6 +5,7 @@ import (
 	"ds101/hw1-q3/common"
 	"encoding/csv"
 	"fmt"
+	"github.com/cheggaaa/pb/v3"
 	"io"
 	"log"
 	"math"
@@ -203,9 +204,7 @@ func main() {
 		return dataset[i].X < dataset[j].X
 	})
 
-	fill3DPoints(&tsePoints, "tse")
-	fill3DPoints(&msePoints, "mse")
-	fill3DPoints(&rmsePoints, "rmse")
+	fill3DPoints()
 
 	log.Println("displaying data distribution at http://localhost:8081/")
 	log.Println("you can also see the TSE chart at http://localhost:8081/tse")
@@ -263,32 +262,34 @@ func rootMeanSquareError(m float64, b float64) float64 {
 	}
 	return math.Pow(tError/float64(len(dataset)), 0.5)
 }
-func fill3DPoints(dat *[][3]float64, ty string) {
+func fill3DPoints() {
 	var m []float64
 	var b []float64
 
-	log.Printf("Prefilling 3D points for type %s", ty)
+	log.Println("Prefilling 3D points")
 
 	log.Println("Generating m and b values")
+
+	bar := pb.StartNew(len(dataset))
 	for i := -len(dataset) / 2; i < len(dataset)/2; i++ {
+		bar.Increment()
 		b = append(b, float64(i))
 		m = append(m, float64(i))
 	}
+	bar.Finish()
 	log.Println("b and m values are generated")
 	log.Println("Generating 3D points")
 	log.Printf("Generating %d points, This may take a while", int(math.Pow(float64(len(dataset)/2), 2)))
+	bar = pb.StartNew(int(math.Pow(float64(len(dataset)/2), 2)))
 	for j := len(dataset) / 4; j < 3*len(dataset)/4; j++ {
 		for i := len(dataset) / 4; i < 3*len(dataset)/4; i++ {
-			if ty == "tse" {
-				*dat = append(*dat, [3]float64{m[j], b[i], totalError(m[j], b[i])})
-			} else if ty == "mse" {
-				*dat = append(*dat, [3]float64{m[j], b[i], meanSquareError(m[j], b[i])})
-			} else if ty == "rmse" {
-				*dat = append(*dat, [3]float64{m[j], b[i], rootMeanSquareError(m[j], b[i])})
-			}
+			tsePoints = append(tsePoints, [3]float64{m[j], b[i], totalError(m[j], b[i])})
+			msePoints = append(msePoints, [3]float64{m[j], b[i], meanSquareError(m[j], b[i])})
+			rmsePoints = append(rmsePoints, [3]float64{m[j], b[i], rootMeanSquareError(m[j], b[i])})
+			bar.Increment()
 		}
 	}
+	bar.Finish()
 	log.Println("Generated 3D points")
 	log.Println("3D points are filled")
-
 }
