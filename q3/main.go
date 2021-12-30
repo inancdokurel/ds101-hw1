@@ -61,13 +61,44 @@ func (d *Dataset) Y() []int {
 	return list
 }
 
+// Returns the total square error of the dataset
+func (d *Dataset) LossM(length int) []float64 {
+	var list []float64
+	for i := -length; i < length; i++ {
+		for j, v := range *d {
+			yPred := float64(i*v.X) + 180814.065531
+			if j == 0 {
+				list = append(list, math.Pow(float64(v.Y)-yPred, 2))
+			} else {
+				list = append(list, list[j-1]+math.Pow(float64(v.Y)-yPred, 2))
+			}
+		}
+	}
+	return list
+}
+
+// Returns the total square error of the dataset
+func (d *Dataset) LossB(length int) []float64 {
+	var list []float64
+	for i := -length; i < length; i++ {
+		for j, v := range *d {
+			yPred := 107.130359*float64(v.X) + float64(i)
+			if j == 0 {
+				list = append(list, math.Pow(float64(v.Y)-yPred, 2))
+			} else {
+				list = append(list, list[j-1]+math.Pow(float64(v.Y)-yPred, 2))
+			}
+		}
+	}
+	return list
+}
 func (d *Dataset) TotalSquareError(slope, yIntercept float64) []float64 {
 	var list []float64
 	for i, v := range *d {
 		if i == 0 {
-			list = append(list, math.Pow(float64(v.Y)-slope*float64(v.X)-yIntercept, 2))
+			list = append(list, math.Pow(float64(v.Y)-(slope*float64(v.X)-yIntercept), 2))
 		} else {
-			list = append(list, math.Pow(float64(v.Y)-slope*float64(v.X)-yIntercept, 2)+list[i-1])
+			list = append(list, math.Pow(float64(v.Y)-(slope*float64(v.X)-yIntercept), 2)+list[i-1])
 		}
 
 	}
@@ -107,7 +138,9 @@ func readCsvFile(filePath string) (data Dataset) {
 	if err != nil {
 		log.Fatal("Unable to read input file "+filePath, err)
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		_ = f.Close()
+	}(f)
 
 	csvReader := csv.NewReader(f)
 	csvReader.FieldsPerRecord = 81
@@ -157,64 +190,105 @@ func readCsvFile(filePath string) (data Dataset) {
 }
 
 var dataset Dataset
-var slope, yIntercept float64
+var tsePoints [][3]float64
+var msePoints [][3]float64
+var rmsePoints [][3]float64
 
 func main() {
 	dataset = readCsvFile("../data/train.csv")
 	fmt.Println("Data is read with the following header map: ", headerMap)
 	fmt.Printf("\n\nX Value is read from %s column, Y Value is read from %s column\n", common.X, common.Y)
-	slope, yIntercept = calculateSlopeYIntercept(&dataset)
-	fmt.Printf("\nSlope is %f, while yIntercept is %f\n", slope, yIntercept)
+	http.HandleFunc("/", chartScatterHTTPServer)
+	sort.Slice(dataset, func(i, j int) bool {
+		return dataset[i].X < dataset[j].X
+	})
+
+	fill3DPoints(&tsePoints, "tse")
+	fill3DPoints(&msePoints, "mse")
+	fill3DPoints(&rmsePoints, "rmse")
+
 	log.Println("displaying data distribution at http://localhost:8081/")
 	log.Println("you can also see the TSE chart at http://localhost:8081/tse")
 	log.Println("you can also see the MSE chart at http://localhost:8081/mse")
 	log.Println("you can also see the RMSE chart at http://localhost:8081/rmse")
-	sort.Slice(dataset, func(i, j int) bool {
-		return dataset[i].X < dataset[j].X
-	})
-	http.HandleFunc("/", chartScatterHTTPServer)
 	http.HandleFunc("/tse", tseChartHTTPServer)
 	http.HandleFunc("/mse", mseChartHTTPServer)
 	http.HandleFunc("/rmse", rmseChartHTTPServer)
-	http.ListenAndServe(":8081", nil)
+	_ = http.ListenAndServe(":8081", nil)
 }
 
 func chartScatterHTTPServer(w http.ResponseWriter, _ *http.Request) {
 	scatterChart := chart.Scatter("Data Distribution", dataset.X(), dataset.Y())
-	scatterChart.Render(w)
-}
-
-func mean(data []int) float64 {
-	var sum int
-	for _, v := range data {
-		sum += v
-	}
-	return float64(sum) / float64(len(data))
+	_ = scatterChart.Render(w)
 }
 
 func tseChartHTTPServer(w http.ResponseWriter, _ *http.Request) {
 	//lineChart := chart.Line2("TSE Chart", dataset.X(), dataset.Y(), dataset.TotalSquareError(slope, yIntercept), "Data", "Loss")
-	lineChart := chart.Line("TSE Chart", dataset.X(), dataset.TotalSquareError(slope, yIntercept), "Total Square Error")
-	lineChart.Render(w)
+	lineChart := chart.Line3D("TSE Chart", tsePoints)
+	_ = lineChart.Render(w)
 }
 
 func mseChartHTTPServer(w http.ResponseWriter, _ *http.Request) {
 	//lineChart := chart.Line2("MSE Chart", dataset.X(), dataset.Y(), dataset.MeanSquareError(slope, yIntercept), "Data", "Loss")
-	lineChart := chart.Line("MSE Chart", dataset.X(), dataset.MeanSquareError(slope, yIntercept), "Mean Square Error")
-	lineChart.Render(w)
+	lineChart := chart.Line3D("MSE Chart", msePoints)
+	_ = lineChart.Render(w)
 }
 
 func rmseChartHTTPServer(w http.ResponseWriter, _ *http.Request) {
 	//lineChart := chart.Line2("RMSE Chart", dataset.X(), dataset.Y(), dataset.RootMeanSquareError(slope, yIntercept), "Data", "Loss")
-	lineChart := chart.Line("RMSE Chart", dataset.X(), dataset.RootMeanSquareError(slope, yIntercept), "Root Mean Square Error")
-	lineChart.Render(w)
+	lineChart := chart.Line3D("RMSE Chart", rmsePoints)
+	_ = lineChart.Render(w)
 }
-func calculateSlopeYIntercept(data *Dataset) (slope, yIntercept float64) {
-	meanX := mean(data.X())
-	meanY := mean(data.Y())
-	meanXY := mean(data.XY())
-	meanX2 := mean(data.XSq())
-	slope = (meanX*meanY - meanXY) / (meanX*meanX - meanX2)
-	yIntercept = meanY + (meanXY-meanX*meanY)/(meanX*meanX-meanX2)
-	return
+
+func totalError(m float64, b float64) float64 {
+	tError := 0.0
+	for i := 0; i < len(dataset); i++ {
+		tError += math.Pow(float64(dataset[i].Y)-m*float64(dataset[i].X)-b, 2)
+	}
+	return tError
+}
+
+func meanSquareError(m float64, b float64) float64 {
+	tError := 0.0
+	for i := 0; i < len(dataset); i++ {
+		tError += math.Pow(float64(dataset[i].Y)-m*float64(dataset[i].X)-b, 2)
+	}
+	return tError / float64(len(dataset))
+}
+
+func rootMeanSquareError(m float64, b float64) float64 {
+	tError := 0.0
+	for i := 0; i < len(dataset); i++ {
+		tError += math.Pow(float64(dataset[i].Y)-m*float64(dataset[i].X)-b, 2)
+	}
+	return math.Pow(tError/float64(len(dataset)), 0.5)
+}
+func fill3DPoints(dat *[][3]float64, ty string) {
+	var m []float64
+	var b []float64
+
+	log.Printf("Prefilling 3D points for type %s", ty)
+
+	log.Println("Generating m and b values")
+	for i := -len(dataset) / 2; i < len(dataset)/2; i++ {
+		b = append(b, float64(i))
+		m = append(m, float64(i))
+	}
+	log.Println("b and m values are generated")
+	log.Println("Generating 3D points")
+	log.Printf("Generating %d points, This may take a while", int(math.Pow(float64(len(dataset)/2), 2)))
+	for j := len(dataset) / 4; j < 3*len(dataset)/4; j++ {
+		for i := len(dataset) / 4; i < 3*len(dataset)/4; i++ {
+			if ty == "tse" {
+				*dat = append(*dat, [3]float64{m[j], b[i], totalError(m[j], b[i])})
+			} else if ty == "mse" {
+				*dat = append(*dat, [3]float64{m[j], b[i], meanSquareError(m[j], b[i])})
+			} else if ty == "rmse" {
+				*dat = append(*dat, [3]float64{m[j], b[i], rootMeanSquareError(m[j], b[i])})
+			}
+		}
+	}
+	log.Println("Generated 3D points")
+	log.Println("3D points are filled")
+
 }
